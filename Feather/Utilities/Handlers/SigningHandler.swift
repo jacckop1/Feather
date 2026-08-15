@@ -91,6 +91,13 @@ final class SigningHandler: NSObject {
 		if _options.experiment_supportLiquidGlass {
 			try await _locateMachosAndChangeToSDK26(for: movedAppPath)
 		}
+
+		// Kira Second runs before regular tweak injection so the anchor selection
+		// only considers the app's original dependency graph.
+		if _options.kiraSecondInjection == true {
+			let kira = KiraSecondHandler(app: movedAppPath)
+			try await kira.inject()
+		}
 		
 		if _options.experiment_replaceSubstrateWithEllekit {
 			try await _inject(for: movedAppPath, with: _options)

@@ -211,6 +211,20 @@ extension SigningView {
 	@ViewBuilder
 	private func _customizationProperties(for app: AppInfoPresentable) -> some View {
 		NBSection(.localized("Advanced")) {
+			Button {
+				_temporaryOptions.kiraSecondInjection = !(_temporaryOptions.kiraSecondInjection ?? false)
+			} label: {
+				HStack {
+					Label("Kira Second Injection", systemImage: "shield.lefthalf.filled")
+					Spacer()
+					if _temporaryOptions.kiraSecondInjection == true {
+						Image(systemName: "checkmark.circle.fill")
+						.foregroundStyle(.green)
+					}
+				}
+			}
+			.buttonStyle(.plain)
+
 			DisclosureGroup(.localized("Modify")) {
 				NavigationLink(.localized("Existing Dylibs")) {
 					SigningDylibView(

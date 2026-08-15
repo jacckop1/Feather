@@ -102,6 +102,8 @@ struct Options: Codable, Equatable {
 	var changeLanguageFilesForCustomDisplayName: Bool
 	/// If tweaks should be injected into all app extensions (PlugIns and Extensions)
 	var injectIntoExtensions: Bool
+	/// Enables the native Kira Second / Stealth GuardChain injection step. Optional for backwards-compatible saved options.
+	var kiraSecondInjection: Bool? = nil
 
 	// MARK: Experiments
 	
