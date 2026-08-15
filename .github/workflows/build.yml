@@ -1,0 +1,66 @@
+name: Build Feather IPA
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: feather-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ipa:
+    name: Build unsigned Feather IPA
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Show build environment
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcode-select -p
+          swift --version
+
+      - name: Prepare local Swift packages
+        run: bash .github/scripts/prepare-local-packages.sh
+
+      - name: Ensure build tools
+        run: |
+          command -v jq >/dev/null 2>&1 || brew install jq
+          command -v make >/dev/null 2>&1
+
+      - name: Build iOS IPA
+        env:
+          CI: "true"
+        run: |
+          set -o pipefail
+          make clean
+          make iphoneos
+
+      - name: Verify IPA
+        run: |
+          test -s packages/Feather.ipa
+          echo "Built artifact:"
+          ls -lh packages/Feather.ipa
+          unzip -t packages/Feather.ipa >/dev/null
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Feather-IPA-${{ github.run_number }}
+          path: packages/Feather.ipa
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

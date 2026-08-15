@@ -1,46 +1,110 @@
-name: Release
+name: Release Feather IPA
 
 on:
   push:
     tags:
-      - v*
+      - 'v*'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
+concurrency:
+  group: feather-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  build:
-    runs-on: macos-latest
+  release:
+    name: Build and publish release
+    runs-on: macos-26
+    timeout-minutes: 60
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - name: Checkout source
+        uses: actions/checkout@v4
         with:
-          submodules: 'true'
+          fetch-depth: 0
 
-      - name: Select Xcode
+      - name: Show build environment
         run: |
-          sudo xcode-select -s /Applications/Xcode_26.3.0.app
+          sw_vers
+          xcodebuild -version
+          xcode-select -p
+          swift --version
 
-      - name: Compile Feather
-        run: | 
-          agvtool new-version -all $(git rev-parse HEAD)
-          make
-          mkdir upload
-          mv packages/* upload/
+      - name: Prepare local Swift packages
+        run: bash .github/scripts/prepare-local-packages.sh
 
-      - name: Extract Version
-        id: get_version
+      - name: Ensure build tools
         run: |
-          VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" _build/Payload/*.app/Info.plist)
-          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          command -v jq >/dev/null 2>&1 || brew install jq
 
-      - name: Create Release
+      - name: Set CI build number
+        run: agvtool new-version -all "${GITHUB_RUN_NUMBER}"
+
+      - name: Build iOS IPA
+        env:
+          CI: "true"
+        run: |
+          set -o pipefail
+          make clean
+          make iphoneos
+
+      - name: Verify IPA
+        run: |
+          test -s packages/Feather.ipa
+          unzip -t packages/Feather.ipa >/dev/null
+          ls -lh packages/Feather.ipa
+
+      - name: Resolve release version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APP_PLIST="_build/Payload/Feather.app/Info.plist"
+          VERSION=""
+
+          if [[ -f "$APP_PLIST" ]]; then
+            VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PLIST" 2>/dev/null || true)
+          fi
+
+          if [[ -z "$VERSION" && -f Feather.xcconfig ]]; then
+            VERSION=$(sed -nE 's/^[[:space:]]*FEATHER_PROJECT_VERSION[[:space:]]*=[[:space:]]*([^[:space:]#]+).*/\1/p' Feather.xcconfig | tail -n 1)
+          fi
+
+          if [[ -z "$VERSION" && "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+
+          if [[ -z "$VERSION" ]]; then
+            echo "::error::Unable to determine Feather version"
+            exit 1
+          fi
+
+          RELEASE_TAG="v${VERSION#v}"
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+          echo "Resolved version: $VERSION"
+          echo "Release tag: $RELEASE_TAG"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Feather-${{ env.APP_VERSION }}
+          path: packages/Feather.ipa
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Feather v${{ env.VERSION }}
-          tag_name: v${{ env.VERSION }}
-          files: |
-            upload/*
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Feather ${{ env.RELEASE_TAG }}
+          files: packages/Feather.ipa
           generate_release_notes: true
           fail_on_unmatched_files: true
-          draft: true
+          draft: false
+          prerelease: ${{ contains(env.RELEASE_TAG, 'beta') || contains(env.RELEASE_TAG, 'alpha') || contains(env.RELEASE_TAG, 'rc') }}
         env:
-          GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
