@@ -35,6 +35,15 @@ jobs:
       - name: Prepare local Swift packages
         run: bash .github/scripts/prepare-local-packages.sh
 
+      - name: Validate pinned dependencies
+        run: |
+          test -f Zsign/Package.swift
+          test -f Zsign/LICENSE
+          test -f Zsign/LICENSE_LC
+          test -f IDeviceKitten/Package.swift
+          test -f LICENSE_ELLEKIT
+          echo "Pinned dependencies are complete"
+
       - name: Ensure build tools
         run: |
           command -v jq >/dev/null 2>&1 || brew install jq
