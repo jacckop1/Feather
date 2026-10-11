@@ -3,8 +3,7 @@
 //  Feather
 //
 //  Native Kira Second injector for the current iKiraPlus V8 framework edition.
-//  Two dylibs are linked into the host path; the five guard frameworks are
-//  installed intact and loaded at runtime by UIDisplayServices.dylib.
+//  Link both dylibs and all five guard frameworks in the original payload order.
 //
 
 import Foundation
@@ -16,11 +15,15 @@ final class KiraSecondHandler {
     private let fileManager = FileManager.default
     private let app: URL
 
-    // Current SSD/V8 layout: only these two dylibs are direct load commands.
-    // UIDisplayServices then loads the five framework guards from App.app/Frameworks.
+    // Preserve the original seven-library dependency order in a host framework.
     private let directLoads = [
+        "@loader_path/../iKiraPlus.dylib",
         "@loader_path/../UIDisplayServices.dylib",
-        "@loader_path/../iKiraPlus.dylib"
+        "@loader_path/../SystemEnvironment.framework/SystemEnvironment",
+        "@loader_path/../ProcessServices.framework/ProcessServices",
+        "@loader_path/../CoreLifecycle.framework/CoreLifecycle",
+        "@loader_path/../UIInfrastructure.framework/UIInfrastructure",
+        "@loader_path/../ProcessSupport.framework/ProcessSupport"
     ]
 
     private let payloadEntries = [
@@ -42,8 +45,8 @@ final class KiraSecondHandler {
     ]
 
     // Fallback for apps whose original framework graph has no binary with enough
-    // Mach-O header slack. The bridge receives only the two direct dylib loads;
-    // it does NOT link the five guard frameworks directly.
+    // Mach-O header slack. SystemEnvironment is the bootstrap and links the other
+    // six libraries without adding a dependency on itself.
     private let bridgeRelativePath = "SystemEnvironment.framework/SystemEnvironment"
     private let bootstrapLoad = "@executable_path/Frameworks/SystemEnvironment.framework/SystemEnvironment"
 
@@ -195,6 +198,8 @@ private extension KiraSecondHandler {
             guard fileManager.fileExists(atPath: standardized.path) else { continue }
             guard seen.insert(standardized.path).inserted else { continue }
 
+            // Relative dependency paths require an executable inside a framework.
+            guard standardized.deletingLastPathComponent().pathExtension == "framework" else { continue }
             let frameworkName = standardized.deletingLastPathComponent().deletingPathExtension().lastPathComponent
             guard !guardFrameworkNames.contains(frameworkName) else { continue }
 
@@ -218,12 +223,13 @@ private extension KiraSecondHandler {
             throw KiraSecondError.bridgeMissing
         }
 
-        // Latest V8 needs only the two dylibs as static load commands.
-        // UIDisplayServices dynamically loads all five framework guards.
-        try _injectRequiredLoads(into: bridge, loads: directLoads)
+        // The main executable loads SystemEnvironment; the bridge loads the
+        // remaining six payload libraries in their original relative order.
+        let bridgeLoads = directLoads.filter { $0 != "@loader_path/../\(bridgeRelativePath)" }
+        try _injectRequiredLoads(into: bridge, loads: bridgeLoads)
         try _injectLoad(bootstrapLoad, into: mainExecutable)
 
-        try _verify(executable: bridge, requires: directLoads)
+        try _verify(executable: bridge, requires: bridgeLoads)
         try _verify(executable: mainExecutable, requires: [bootstrapLoad], allowUnsupportedMachO: true)
     }
 
