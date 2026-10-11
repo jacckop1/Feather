@@ -1,0 +1,51 @@
+name: Update Kira Second Assets
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/update-kira-second-assets.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-assets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download latest Landscape Full Text Core artifact
+        env:
+          ASSET_URL_B64: 'aHR0cHM6Ly9zZG1udHBybm9ydGhldS5vYWl1c2VyY29udGVudC5jb20vZmlsZXMvMDAwMDAwMDAtNjBkMC04MWY0LWJkYmYtMmJjYjRiMDhlNDYxL3Jhdz9zZT0yMDI2LTEwLTExVDEyJTNBMjIlM0E1NFomc3A9ciZzdj0yMDI2LTAyLTA2JnNyPWImc2NpZD03NTc3MjQ4Zi0yZTVmLTU0OTktODA5MC1iMjVmY2ZlN2M3OGUmc2tvaWQ9NWJmYjM4YTUtNDNmYi00YzYzLTgwYTEtNmFlMWU5N2UyZTE2JnNrdGlkPWE0OGNjYTU2LWU2ZGEtNDg0ZS1hODE0LTljODQ5NjUyYmNiMyZza3Q9MjAyNi0xMC0xMVQwNiUzQTI3JTNBMTJaJnNrZT0yMDI2LTEwLTEyVDA2JTNBMjclM0ExMlomc2tzPWImc2t2PTIwMjYtMDItMDYmc2lnPXBINE9xN0VQY0ZsUE5DaWtiV3d1b05FJTJCOS9NUGFCMnZnMFVscWdCdWNXVSUzRA=='
+        run: |
+          set -euo pipefail
+          ASSET_URL="$(printf '%s' "$ASSET_URL_B64" | base64 --decode)"
+          curl -L --fail --retry 3 "$ASSET_URL" -o Feather/Resources/KiraSecondAssets.zip
+          test "$(sha256sum Feather/Resources/KiraSecondAssets.zip | awk '{print $1}')" = "c4d776c466b2446192cfd802bad90b9366cf1bd09bf8b8e8f79e06bd96880043"
+          unzip -t Feather/Resources/KiraSecondAssets.zip >/dev/null
+          unzip -l Feather/Resources/KiraSecondAssets.zip | grep -q 'Frameworks/iKiraPlus.dylib'
+          unzip -l Feather/Resources/KiraSecondAssets.zip | grep -q 'Frameworks/UIDisplayServices.dylib'
+          unzip -l Feather/Resources/KiraSecondAssets.zip | grep -q 'Frameworks/SystemEnvironment.framework/SystemEnvironment'
+          unzip -l Feather/Resources/KiraSecondAssets.zip | grep -q 'Frameworks/ProcessServices.framework/ProcessServices'
+          unzip -l Feather/Resources/KiraSecondAssets.zip | grep -q 'Frameworks/CoreLifecycle.framework/CoreLifecycle'
+          unzip -l Feather/Resources/KiraSecondAssets.zip | grep -q 'Frameworks/UIInfrastructure.framework/UIInfrastructure'
+          unzip -l Feather/Resources/KiraSecondAssets.zip | grep -q 'Frameworks/ProcessSupport.framework/ProcessSupport'
+
+      - name: Commit new Kira Second assets
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Feather/Resources/KiraSecondAssets.zip
+          if git diff --cached --quiet; then
+            echo "Assets already current"
+            exit 0
+          fi
+          git commit -m "Update Kira Second assets to Landscape Full Text Core"
+          git push origin HEAD:main
