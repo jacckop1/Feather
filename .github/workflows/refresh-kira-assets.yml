@@ -1,0 +1,113 @@
+name: Refresh Kira Second V8 Assets
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/KIRA_REFRESH_TRIGGER'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kira-second-v8-refresh
+  cancel-in-progress: true
+
+jobs:
+  refresh-build:
+    name: Refresh latest SSD assets and build Feather
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Feather
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download latest successful SSD V8 artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --retry-delay 2 \
+            'https://sdmntpritalynorth.oaiusercontent.com/files/00000000-e0b0-8246-9cc5-eb931670f4f5/raw?se=2026-10-11T09%3A20%3A45Z&sp=r&sv=2026-02-06&sr=b&scid=030c78ea-63be-5617-a101-bd20a0387aec&skoid=5bfb38a5-43fb-4c63-80a1-6ae1e97e2e16&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-10-11T07%3A21%3A26Z&ske=2026-10-12T07%3A21%3A26Z&sks=b&skv=2026-02-06&sig=cDgxf5wtapubxQc2nqdANKU1cprkxJwA1HwoB60hpzY%3D' \
+            --output /tmp/ssd-v8.zip
+          unzip -t /tmp/ssd-v8.zip >/dev/null
+          rm -rf /tmp/ssd-v8
+          mkdir -p /tmp/ssd-v8
+          unzip -q /tmp/ssd-v8.zip -d /tmp/ssd-v8
+
+          test -s /tmp/ssd-v8/Frameworks/iKiraPlus.dylib
+          test -s /tmp/ssd-v8/Frameworks/UIDisplayServices.dylib
+          for name in UIInfrastructure CoreLifecycle ProcessServices ProcessSupport SystemEnvironment; do
+            test -s "/tmp/ssd-v8/Frameworks/$name.framework/$name"
+            test -s "/tmp/ssd-v8/Frameworks/$name.framework/Info.plist"
+          done
+
+      - name: Replace embedded Kira Second payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f Feather/Resources/KiraSecondAssets.zip
+          (
+            cd /tmp/ssd-v8
+            /usr/bin/zip -qry "$GITHUB_WORKSPACE/Feather/Resources/KiraSecondAssets.zip" Frameworks
+          )
+          test -s Feather/Resources/KiraSecondAssets.zip
+          echo 'Embedded payload:'
+          unzip -l Feather/Resources/KiraSecondAssets.zip
+
+      - name: Prepare local Swift packages
+        run: bash .github/scripts/prepare-local-packages.sh
+
+      - name: Validate pinned dependencies
+        run: |
+          test -f Zsign/Package.swift
+          test -f Zsign/LICENSE
+          test -f Zsign/LICENSE_LC
+          test -f IDeviceKitten/Package.swift
+          test -f LICENSE_ELLEKIT
+
+      - name: Ensure build tools
+        run: |
+          command -v jq >/dev/null 2>&1 || brew install jq
+          command -v make >/dev/null 2>&1
+
+      - name: Build Feather IPA with refreshed Kira Second
+        env:
+          CI: 'true'
+        run: |
+          set -o pipefail
+          make clean
+          make iphoneos
+
+      - name: Verify Feather IPA
+        run: |
+          test -s packages/Feather.ipa
+          unzip -t packages/Feather.ipa >/dev/null
+          unzip -l packages/Feather.ipa | grep -q 'KiraSecondAssets.zip'
+          ls -lh packages/Feather.ipa Feather/Resources/KiraSecondAssets.zip
+
+      - name: Upload refreshed Feather IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Feather-KiraSecond-V8-${{ github.run_number }}
+          path: packages/Feather.ipa
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Commit refreshed Kira Second assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'iKiraPlus Build Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add Feather/Resources/KiraSecondAssets.zip
+          if git diff --cached --quiet; then
+            echo 'Kira Second assets are already current.'
+            exit 0
+          fi
+          git commit -m 'Refresh Kira Second assets from latest SSD V8 build'
+          git push origin HEAD:main
